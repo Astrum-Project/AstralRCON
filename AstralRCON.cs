@@ -1,4 +1,5 @@
-﻿using MelonLoader;
+﻿using Astrum.AstralCore.Managers;
+using MelonLoader;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -9,7 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-[assembly: MelonInfo(typeof(Astrum.AstralRCON), "AstralRCON", "0.1.0", downloadLink: "github.com/Astrum-Project/AstralRCON")]
+[assembly: MelonInfo(typeof(Astrum.AstralRCON), nameof(Astrum.AstralRCON), "0.1.1", downloadLink: "github.com/Astrum-Project/" + nameof(Astrum.AstralRCON))]
 [assembly: MelonGame("VRChat", "VRChat")]
 [assembly: MelonColor(ConsoleColor.DarkMagenta)]
 
@@ -23,7 +24,17 @@ namespace Astrum
         public static List<Socket> connections = new List<Socket>();
         public static Mutex connectionsMutex = new Mutex();
 
-        public override void OnApplicationStart() => Task.Run(Initialize);
+        public override void OnApplicationStart()
+        {
+            Task.Run(Initialize);
+
+            ModuleManager.Module module = new ModuleManager.Module("RCON");
+            module.Register("password", new CommandManager.ConVar<string>(new Action<string>(value => {
+                password = value;
+                AstralCore.Logger.Info("[RCON] Password changed");
+                connections.ForEach(x => x.Close());
+            })));
+        }
 
         private static void Initialize()
         {
@@ -94,7 +105,18 @@ namespace Astrum
             if (!queued.TryDequeue(out (Socket, Packet) result))
                 yield break;
 
-            result.Item1.Send(new Packet(result.Item2.id, Packet.PacketType.SERVERDATA_RESPONSE_VALUE, AstralCore.Managers.CommandManager.Execute(result.Item2.body)).ToBytes());
+            string res;
+            try
+            {
+                res = CommandManager.Execute(result.Item2.body);
+            } 
+            catch (Exception ex)
+            {
+                AstralCore.Logger.Trace("\x1b[33m" + ex + "\x1b[0m");
+                res = "Exception occurred while running command";
+            }
+
+            result.Item1.Send(new Packet(result.Item2.id, Packet.PacketType.SERVERDATA_RESPONSE_VALUE, res).ToBytes());
         }
 
         public class Packet
@@ -140,25 +162,25 @@ namespace Astrum
             public byte[] ToBytes()
             {
                 int size = body.Length + 10;
-                byte[] body_ = Encoding.UTF8.GetBytes(body);
-                var list = new List<byte>();
+                List<byte> list = new List<byte>
+                {
+                    (byte)(size & 0x000000FF),
+                    (byte)(size & 0x0000FF00),
+                    (byte)(size & 0x00FF0000),
+                    (byte)(size & 0xFF000000),
 
-                list.Add((byte)(size & 0x000000FF));
-                list.Add((byte)(size & 0x0000FF00));
-                list.Add((byte)(size & 0x00FF0000));
-                list.Add((byte)(size & 0xFF000000));
+                    (byte)(id & 0x000000FF),
+                    (byte)(id & 0x0000FF00),
+                    (byte)(id & 0x00FF0000),
+                    (byte)(id & 0xFF000000),
 
-                list.Add((byte)(id & 0x000000FF));
-                list.Add((byte)(id & 0x0000FF00));
-                list.Add((byte)(id & 0x00FF0000));
-                list.Add((byte)(id & 0xFF000000));
+                    (byte)((int)type & 0x000000FF),
+                    (byte)((int)type & 0x0000FF00),
+                    (byte)((int)type & 0x00FF0000),
+                    (byte)((int)type & 0xFF000000)
+                };
 
-                list.Add((byte)((int)type & 0x000000FF));
-                list.Add((byte)((int)type & 0x0000FF00));
-                list.Add((byte)((int)type & 0x00FF0000));
-                list.Add((byte)((int)type & 0xFF000000));
-
-                list = list.Concat(body_).ToList();
+                list = list.Concat(Encoding.UTF8.GetBytes(body)).ToList();
 
                 list.Add(0);
                 list.Add(0);
